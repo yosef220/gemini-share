@@ -85,9 +85,16 @@ export default function App() {
 
   // Handle Google redirect result
   useEffect(() => {
-    getRedirectResult(auth).catch(err => {
-      if (err?.code && err.code !== "auth/no-current-user") {
-        setLoginError("שגיאה בהתחברות. נסה שוב.");
+    const wasPending = sessionStorage.getItem("authPending") === "1";
+    getRedirectResult(auth).then(result => {
+      sessionStorage.removeItem("authPending");
+      if (!result && wasPending) {
+        setFirestoreBlocked(true);
+      }
+    }).catch(err => {
+      sessionStorage.removeItem("authPending");
+      if (wasPending || (err?.code && err.code !== "auth/no-current-user")) {
+        setFirestoreBlocked(true);
       }
     });
   }, []);
@@ -208,8 +215,10 @@ export default function App() {
   async function login() {
     setLoginError("");
     try {
+      sessionStorage.setItem("authPending", "1");
       await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (err) {
+      sessionStorage.removeItem("authPending");
       setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
       console.error(err);
     }
