@@ -788,36 +788,37 @@ export default function App() {
         )}
 
         {/* BANK */}
-        {screen === "bank" && (
-          <div>
-            <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>בנק קודים</h2>
-            <p style={{ fontSize: 13, color: "#9ca3af", marginBottom: 20 }}>
-              {codes.filter(c => c.remainingSlots > 0).length} קודים פעילים כרגע
-            </p>
-
-            {codes.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0" }}>
-                <p style={{ fontSize: 14, color: "#9ca3af" }}>אין קודים בבנק כרגע. היה הראשון להעלות!</p>
-              </div>
-            )}
-
-            {codes.map(c => (
-              <div key={c.id} id={`code-${c.id}`} style={{
-                background: highlightedCodeId === c.id ? "#f5f3ff" : "#fff",
-                border: highlightedCodeId === c.id ? "2px solid #6C63FF" : "1px solid #ede9fe",
-                borderRadius: 14, padding: "16px 18px", marginBottom: 12,
-                opacity: c.remainingSlots === 0 ? 0.5 : 1,
-                transition: "border 0.3s",
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <code style={{ fontSize: 13, fontFamily: "monospace", color: "#4c1d95" }}>{c.code}</code>
-                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>נוסף {timeAgo(c.createdAt)}</div>
-                  </div>
-                  <Badge color={c.remainingSlots === 0 ? "gray" : c.remainingSlots <= 2 ? "yellow" : "green"}>
-                    {c.remainingSlots === 0 ? "מלא" : `${c.remainingSlots} מקומות פנויים`}
-                  </Badge>
+        {screen === "bank" && (() => {
+          const activeCodes = codes.filter(c => c.remainingSlots > 0);
+          const expiredCodes = codes.filter(c => c.remainingSlots === 0);
+          const renderCard = (c, expired) => (
+            <div key={c.id} id={`code-${c.id}`} style={{
+              background: expired ? "#f9fafb" : highlightedCodeId === c.id ? "#f5f3ff" : "#fff",
+              border: highlightedCodeId === c.id ? "2px solid #6C63FF" : expired ? "1px solid #e5e7eb" : "1px solid #ede9fe",
+              borderRadius: 14, padding: "16px 18px", marginBottom: 12,
+              transition: "border 0.3s",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <code style={{
+                    fontSize: 13, fontFamily: "monospace",
+                    color: expired ? "#9ca3af" : "#4c1d95",
+                    textDecoration: expired ? "line-through" : "none",
+                  }}>{c.code}</code>
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>נוסף {timeAgo(c.createdAt)}</div>
                 </div>
+                {expired ? (
+                  <span style={{
+                    fontSize: 11, padding: "3px 10px", borderRadius: 20, fontWeight: 600,
+                    background: "#f3f4f6", color: "#9ca3af",
+                  }}>נגמר — לא רלוונטי</span>
+                ) : (
+                  <Badge color={c.remainingSlots <= 2 ? "yellow" : "green"}>
+                    {c.remainingSlots} מקומות פנויים
+                  </Badge>
+                )}
+              </div>
+              {!expired && (
                 <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <SlotsBar taken={c.takenSlots || 0} />
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -839,10 +840,44 @@ export default function App() {
                     }}>🔗 שתף</button>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+            </div>
+          );
+          return (
+            <div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>בנק קודים</h2>
+              <p style={{ fontSize: 13, color: "#9ca3af", marginBottom: 20 }}>
+                {activeCodes.length} קודים פעילים כרגע
+              </p>
+
+              {activeCodes.length === 0 && (
+                <div style={{
+                  textAlign: "center", padding: "32px 0",
+                  background: "#fff", border: "1px solid #ede9fe", borderRadius: 14,
+                  marginBottom: 16,
+                }}>
+                  <p style={{ fontSize: 14, color: "#9ca3af" }}>אין קודים זמינים כרגע. היה הראשון להעלות!</p>
+                </div>
+              )}
+
+              {activeCodes.map(c => renderCard(c, false))}
+
+              {expiredCodes.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{
+                    fontSize: 13, color: "#9ca3af", cursor: "pointer",
+                    marginBottom: 12, userSelect: "none", listStyle: "none",
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}>
+                    <span>▸</span>
+                    <span>{expiredCodes.length} קודים שנגמרו (לא רלוונטי)</span>
+                  </summary>
+                  {expiredCodes.map(c => renderCard(c, true))}
+                </details>
+              )}
+            </div>
+          );
+        })()}
 
         {/* PROFILE */}
         {screen === "profile" && user && profile && (
