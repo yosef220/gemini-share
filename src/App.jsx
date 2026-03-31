@@ -339,7 +339,13 @@ export default function App() {
         display: "flex", padding: "0 16px", gap: 4,
       }}>
         {NAV.map(n => (
-          <button key={n.id} onClick={() => setScreen(n.id)} style={{
+          <button key={n.id} onClick={() => {
+            if (!user && ["get", "profile", "notifications"].includes(n.id)) {
+              setScreen("login");
+            } else {
+              setScreen(n.id);
+            }
+          }} style={{
             padding: "12px 16px", fontSize: 14, fontWeight: screen === n.id ? 600 : 400,
             color: screen === n.id ? "#6C63FF" : "#6b7280",
             background: "none", border: "none", cursor: "pointer",
