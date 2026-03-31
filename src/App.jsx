@@ -81,6 +81,7 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [ratingCodeId, setRatingCodeId] = useState(null);
   const [ratingCodeText, setRatingCodeText] = useState("");
+  const [firestoreBlocked, setFirestoreBlocked] = useState(false);
 
   // Handle Google redirect result
   useEffect(() => {
@@ -143,9 +144,15 @@ export default function App() {
   useEffect(() => {
     if (!user) { setCodes([]); return; }
     const q = query(collection(db, "codes"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, (snapshot) => {
-      setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = onSnapshot(q,
+      (snapshot) => {
+        setFirestoreBlocked(false);
+        setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      (err) => {
+        if (err.code === "unavailable") setFirestoreBlocked(true);
+      }
+    );
     return unsub;
   }, [user]);
 
@@ -472,6 +479,27 @@ export default function App() {
           }}>{n.label}</button>
         ))}
       </nav>
+
+      {/* NetFree / firewall blocking banner */}
+      {firestoreBlocked && (
+        <div style={{
+          background: "#fef3c7", borderBottom: "1px solid #fcd34d",
+          padding: "12px 20px", textAlign: "center", fontSize: 13,
+        }}>
+          <strong>⚠️ החיבור לשרת נחסם על ידי תוכנת הסינון שלך (NetFree / אחרת)</strong>
+          <br />
+          <span style={{ color: "#6b7280" }}>
+            כדי להשתמש באפליקציה יש לפנות לחברת הסינון ולבקש פתיחה של הדומיין:{" "}
+            <code style={{ background: "#fde68a", padding: "1px 4px", borderRadius: 3 }}>firestore.googleapis.com</code>
+          </span>
+          <div style={{ marginTop: 6 }}>
+            <a href="https://support.netfree.link/en/submit-a-ticket" target="_blank" rel="noreferrer"
+              style={{ color: "#d97706", fontWeight: 700, fontSize: 12 }}>
+              פתח פניה ל-NetFree ←
+            </a>
+          </div>
+        </div>
+      )}
 
       <main style={{ maxWidth: 560, margin: "0 auto", padding: "24px 16px" }}>
 
