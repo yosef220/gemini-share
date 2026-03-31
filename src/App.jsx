@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import {
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   onAuthStateChanged,
   signOut,
 } from "firebase/auth";
@@ -82,15 +81,6 @@ export default function App() {
   const [ratingCodeId, setRatingCodeId] = useState(null);
   const [ratingCodeText, setRatingCodeText] = useState("");
 
-  // Handle Google redirect result
-  useEffect(() => {
-    getRedirectResult(auth).catch(err => {
-      if (err?.code && err.code !== "auth/no-current-user") {
-        setLoginError("שגיאה בהתחברות. נסה שוב.");
-      }
-    });
-  }, []);
-
   // URL param: ?ref=CODE_ID → go to bank and highlight that code
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -139,15 +129,14 @@ export default function App() {
     return unsub;
   }, [user]);
 
-  // Real-time codes listener — only when authenticated
+  // Real-time codes listener
   useEffect(() => {
-    if (!user) { setCodes([]); return; }
     const q = query(collection(db, "codes"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snapshot) => {
       setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return unsub;
-  }, [user]);
+  }, []);
 
   // Waiting list status
   useEffect(() => {
@@ -201,9 +190,12 @@ export default function App() {
   async function login() {
     setLoginError("");
     try {
-      await signInWithRedirect(auth, new GoogleAuthProvider());
+      await signInWithPopup(auth, new GoogleAuthProvider());
+      setScreen("home");
     } catch (err) {
-      setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
+      if (err.code !== "auth/popup-closed-by-user") {
+        setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
+      }
       console.error(err);
     }
   }
