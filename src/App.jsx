@@ -761,6 +761,18 @@ export default function App() {
           </div>
         )}
 
+      <footer style={{
+        textAlign: "center", padding: "20px 16px",
+        fontSize: 13, color: "#9ca3af",
+        borderTop: "1px solid #f3f4f6", marginTop: 8,
+      }}>
+        נבנה ע"י{" "}
+        <a
+          href="https://mitmachim.top/user/%D7%9E%D7%93%D7%A8%D7%99%D7%9A-html"
+          target="_blank" rel="noopener noreferrer"
+          style={{ color: "#6C63FF", textDecoration: "none", fontWeight: 600 }}
+        >@מדריך html</a>
+      </footer>
       </main>
     </div>
   );
