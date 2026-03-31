@@ -7,8 +7,8 @@ import {
   signOut,
 } from "firebase/auth";
 import {
-  collection, doc, getDoc, setDoc, updateDoc, addDoc,
-  query, orderBy, onSnapshot,
+  collection, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
+  query, orderBy, where, getDocs, onSnapshot,
   serverTimestamp, increment, Timestamp,
 } from "firebase/firestore";
 
@@ -75,6 +75,21 @@ export default function App() {
   const [uploadError, setUploadError] = useState("");
   const [copied, setCopied] = useState(false);
   const [reportedIds, setReportedIds] = useState(new Set());
+  const [isInWaitingList, setIsInWaitingList] = useState(false);
+  const [highlightedCodeId, setHighlightedCodeId] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [ratingCodeId, setRatingCodeId] = useState(null);
+  const [ratingCodeText, setRatingCodeText] = useState("");
+
+  // URL param: ?ref=CODE_ID → go to bank and highlight that code
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref) {
+      setHighlightedCodeId(ref);
+      setScreen("bank");
+    }
+  }, []);
 
   // Auth state listener
   useEffect(() => {
@@ -123,6 +138,31 @@ export default function App() {
     return unsub;
   }, []);
 
+  // Waiting list status
+  useEffect(() => {
+    if (!user) { setIsInWaitingList(false); return; }
+    const q = query(collection(db, "waitingList"), where("userId", "==", user.uid));
+    getDocs(q).then(snap => setIsInWaitingList(!snap.empty));
+  }, [user]);
+
+  // Admin: load reports
+  useEffect(() => {
+    if (!profile?.isAdmin) return;
+    const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, snap => setReports(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return unsub;
+  }, [profile?.isAdmin]);
+
+  // Rating pending: check if 48h passed since takenAt
+  useEffect(() => {
+    if (!profile?.takenAt || profile?.hasRated) return;
+    const takenDate = profile.takenAt.toDate ? profile.takenAt.toDate() : new Date(profile.takenAt);
+    if (Date.now() - takenDate.getTime() >= 48 * 60 * 60 * 1000) {
+      setRatingCodeId(profile.lastReceivedCodeId);
+      setRatingCodeText(profile.lastReceivedCode);
+    }
+  }, [profile]);
+
   // Computed values
   const lockoutDate = profile?.lockoutEnds?.toDate ? profile.lockoutEnds.toDate() : (profile?.lockoutEnds ? new Date(profile.lockoutEnds) : null);
   const isLocked = lockoutDate && Date.now() < lockoutDate.getTime();
@@ -168,8 +208,11 @@ export default function App() {
   // Get a random available code
   async function getCode() {
     if (!user || !profile || isLocked) return;
-    const available = codes.filter(c => c.remainingSlots > 0 && c.uploadedBy !== user.uid);
-    if (!available.length) return;
+    const available = codes.filter(c => c.remainingSlots > 0 && c.uploadedBy !== user.uid && (c.dislikes || 0) < 3);
+    if (!available.length) {
+      await joinWaitingList();
+      return;
+    }
     const pick = available[Math.floor(Math.random() * available.length)];
     try {
       await updateDoc(doc(db, "codes", pick.id), {
@@ -181,6 +224,8 @@ export default function App() {
         lastReceivedCodeId: pick.id,
         lastReceivedCode: pick.code,
         markedTaken: false,
+        hasRated: false,
+        takenAt: null,
       });
       setScreen("get");
     } catch (err) {
@@ -188,7 +233,57 @@ export default function App() {
     }
   }
 
-  // Mark code as taken — starts 24h lockout
+  // Join waiting list when no codes available
+  async function joinWaitingList() {
+    if (!user || isInWaitingList) return;
+    try {
+      await addDoc(collection(db, "waitingList"), {
+        userId: user.uid,
+        email: user.email,
+        joinedAt: serverTimestamp(),
+      });
+      setIsInWaitingList(true);
+    } catch (err) {
+      console.error("joinWaitingList error:", err);
+    }
+  }
+
+  // Rate a code (called after 48h)
+  async function rateCode(liked) {
+    if (!user || !ratingCodeId) return;
+    try {
+      await updateDoc(doc(db, "codes", ratingCodeId), {
+        [liked ? "likes" : "dislikes"]: increment(1),
+      });
+      await updateDoc(doc(db, "users", user.uid), { hasRated: true });
+      setRatingCodeId(null);
+      setRatingCodeText("");
+    } catch (err) {
+      console.error("rateCode error:", err);
+    }
+  }
+
+  // Admin: delete a code
+  async function deleteCode(codeId) {
+    if (!profile?.isAdmin) return;
+    try {
+      await deleteDoc(doc(db, "codes", codeId));
+    } catch (err) {
+      console.error("deleteCode error:", err);
+    }
+  }
+
+  // Admin: delete a report
+  async function deleteReport(reportId) {
+    if (!profile?.isAdmin) return;
+    try {
+      await deleteDoc(doc(db, "reports", reportId));
+    } catch (err) {
+      console.error("deleteReport error:", err);
+    }
+  }
+
+  // Mark code as taken — starts 24h lockout, stores takenAt for rating
   async function markTaken() {
     if (!user || !profile) return;
     const lockoutEnds = Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
@@ -201,6 +296,8 @@ export default function App() {
       await updateDoc(doc(db, "users", user.uid), {
         markedTaken: true,
         lockoutEnds,
+        takenAt: serverTimestamp(),
+        hasRated: false,
         history: [historyEntry, ...(profile.history || [])],
       });
     } catch (err) {
@@ -230,6 +327,8 @@ export default function App() {
         code,
         remainingSlots: 10,
         takenSlots: 0,
+        likes: 0,
+        dislikes: 0,
         uploadedBy: user.uid,
         createdAt: serverTimestamp(),
       });
@@ -239,6 +338,16 @@ export default function App() {
         uploadedCode: code,
       });
       setUploadCode("");
+      const wlSnap = await getDocs(collection(db, "waitingList"));
+      for (const wDoc of wlSnap.docs) {
+        const wData = wDoc.data();
+        if (wData.userId !== user.uid) {
+          await updateDoc(doc(db, "users", wData.userId), {
+            waitingListNotification: true,
+          }).catch(() => {});
+          await deleteDoc(wDoc.ref).catch(() => {});
+        }
+      }
     } catch (err) {
       setUploadError("שגיאה בהעלאת הקוד. נסה שוב.");
       console.error(err);
@@ -277,6 +386,7 @@ export default function App() {
     { id: "get", label: "חלק קוד" },
     { id: "bank", label: "בנק קודים" },
     ...(user ? [{ id: "profile", label: "האזור שלי" }] : []),
+    ...(profile?.isAdmin ? [{ id: "admin", label: "🛡 ניהול" }] : []),
   ];
 
   if (authLoading) {
@@ -409,6 +519,27 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* waiting list notification */}
+            {profile?.waitingListNotification && (
+              <div style={{
+                background: "#ecfdf5", border: "1px solid #6ee7b7",
+                borderRadius: 14, padding: "14px 18px", marginBottom: 16,
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}>
+                <div>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: "#065f46", margin: 0 }}>🎉 קוד חדש זמין!</p>
+                  <p style={{ fontSize: 12, color: "#047857", margin: "4px 0 0" }}>הצטרפת לרשימת ההמתנה — יש קוד חדש בבנק</p>
+                </div>
+                <button onClick={async () => {
+                  await updateDoc(doc(db, "users", user.uid), { waitingListNotification: false });
+                  getCode();
+                }} style={{
+                  padding: "8px 18px", borderRadius: 20, fontSize: 13, fontWeight: 700,
+                  background: "#6C63FF", color: "#fff", border: "none", cursor: "pointer",
+                }}>חלק עכשיו ←</button>
+              </div>
+            )}
 
             {isLocked ? (
               <div style={{
@@ -609,6 +740,40 @@ export default function App() {
               </div>
             )}
 
+            {/* rating prompt */}
+            {ratingCodeId && (
+              <div style={{
+                background: "#fff", border: "1.5px solid #6C63FF",
+                borderRadius: 16, padding: 20, marginBottom: 20,
+              }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>הקוד עבד?</h3>
+                <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+                  עברו 48 שעות — הקוד <code style={{ fontFamily: "monospace", color: "#4c1d95" }}>{ratingCodeText}</code> עבד?
+                </p>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => rateCode(true)} style={{
+                    flex: 1, padding: "10px", borderRadius: 12, fontSize: 20,
+                    background: "#ecfdf5", border: "1px solid #6ee7b7", cursor: "pointer",
+                  }}>👍 עבד!</button>
+                  <button onClick={() => rateCode(false)} style={{
+                    flex: 1, padding: "10px", borderRadius: 12, fontSize: 20,
+                    background: "#fef2f2", border: "1px solid #fca5a5", cursor: "pointer",
+                  }}>👎 לא עבד</button>
+                </div>
+              </div>
+            )}
+
+            {/* in waiting list */}
+            {isInWaitingList && !profile?.hasReceivedCode && (
+              <div style={{
+                background: "#f5f3ff", border: "1px solid #c4b5fd",
+                borderRadius: 14, padding: "16px 18px", textAlign: "center",
+              }}>
+                <p style={{ fontSize: 15, fontWeight: 700, color: "#6C63FF", marginBottom: 4 }}>ברשימת ההמתנה ⌛</p>
+                <p style={{ fontSize: 13, color: "#7c3aed" }}>קיבלת התראה אוטומטית כשיתוסף קוד חדש</p>
+              </div>
+            )}
+
             {!user && (
               <div style={{ textAlign: "center", padding: "40px 0" }}>
                 <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 16 }}>צריך להיות מחובר כדי לחלק קוד</p>
@@ -637,10 +802,12 @@ export default function App() {
             )}
 
             {codes.map(c => (
-              <div key={c.id} style={{
-                background: "#fff", border: "1px solid #ede9fe",
+              <div key={c.id} id={`code-${c.id}`} style={{
+                background: highlightedCodeId === c.id ? "#f5f3ff" : "#fff",
+                border: highlightedCodeId === c.id ? "2px solid #6C63FF" : "1px solid #ede9fe",
                 borderRadius: 14, padding: "16px 18px", marginBottom: 12,
                 opacity: c.remainingSlots === 0 ? 0.5 : 1,
+                transition: "border 0.3s",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
@@ -653,14 +820,24 @@ export default function App() {
                 </div>
                 <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <SlotsBar taken={c.takenSlots || 0} />
-                  {reportedIds.has(c.id) ? (
-                    <span style={{ fontSize: 11, color: "#9ca3af" }}>דווח ✓</span>
-                  ) : (
-                    <button onClick={() => reportCode(c.id)} style={{
-                      fontSize: 11, color: "#9ca3af", background: "none",
-                      border: "none", cursor: "pointer", textDecoration: "underline",
-                    }}>דווח על קוד שבור</button>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    {reportedIds.has(c.id) ? (
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>דווח ✓</span>
+                    ) : (
+                      <button onClick={() => reportCode(c.id)} style={{
+                        fontSize: 11, color: "#9ca3af", background: "none",
+                        border: "none", cursor: "pointer", textDecoration: "underline",
+                      }}>דווח על קוד שבור</button>
+                    )}
+                    <button onClick={() => {
+                      const url = `${window.location.origin}${window.location.pathname}?ref=${c.id}`;
+                      navigator.clipboard?.writeText(url).catch(() => {});
+                      alert("קישור הועתק 🔗");
+                    }} style={{
+                      fontSize: 11, color: "#6C63FF", background: "none",
+                      border: "none", cursor: "pointer",
+                    }}>🔗 שתף</button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -761,6 +938,81 @@ export default function App() {
                       transition: "right 0.2s",
                     }} />
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ADMIN */}
+        {screen === "admin" && profile?.isAdmin && (
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>🛡 לוח ניהול</h2>
+            <p style={{ fontSize: 13, color: "#9ca3af", marginBottom: 20 }}>{reports.length} דיווחים פתוחים</p>
+
+            {reports.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 0" }}>
+                <p style={{ fontSize: 14, color: "#9ca3af" }}>אין דיווחים פתוחים ✅</p>
+              </div>
+            ) : (
+              reports.map(r => {
+                const reportedCode = codes.find(c => c.id === r.codeId);
+                return (
+                  <div key={r.id} style={{
+                    background: "#fff", border: "1px solid #fca5a5",
+                    borderRadius: 14, padding: "16px 18px", marginBottom: 12,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <code style={{ fontSize: 13, fontFamily: "monospace", color: "#4c1d95" }}>
+                          {reportedCode?.code || r.codeId}
+                        </code>
+                        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                          דווח {timeAgo(r.createdAt)}
+                        </div>
+                        {reportedCode && (
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                            {reportedCode.remainingSlots} מקומות פנויים · 👍 {reportedCode.likes || 0} · 👎 {reportedCode.dislikes || 0}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => deleteReport(r.id)} style={{
+                          fontSize: 12, padding: "6px 14px", borderRadius: 20,
+                          background: "#f3f4f6", border: "none", cursor: "pointer",
+                          color: "#374151", fontWeight: 600,
+                        }}>בטל דיווח</button>
+                        <button onClick={async () => { await deleteCode(r.codeId); await deleteReport(r.id); }} style={{
+                          fontSize: 12, padding: "6px 14px", borderRadius: 20,
+                          background: "#fef2f2", border: "1px solid #fca5a5", cursor: "pointer",
+                          color: "#dc2626", fontWeight: 600,
+                        }}>מחק קוד</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+
+            <div style={{ marginTop: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>כל הקודים</h3>
+              {codes.map(c => (
+                <div key={c.id} style={{
+                  background: "#fff", border: "1px solid #ede9fe",
+                  borderRadius: 12, padding: "12px 16px", marginBottom: 8,
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}>
+                  <div>
+                    <code style={{ fontSize: 12, fontFamily: "monospace", color: "#4c1d95" }}>{c.code}</code>
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                      {c.remainingSlots} פנויים · 👍 {c.likes || 0} · 👎 {c.dislikes || 0}
+                    </div>
+                  </div>
+                  <button onClick={() => deleteCode(c.id)} style={{
+                    fontSize: 12, padding: "5px 12px", borderRadius: 20,
+                    background: "#fef2f2", border: "1px solid #fca5a5",
+                    color: "#dc2626", cursor: "pointer", fontWeight: 600,
+                  }}>מחק</button>
                 </div>
               ))}
             </div>
