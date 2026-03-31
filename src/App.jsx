@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import {
   GoogleAuthProvider,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged,
   signOut,
 } from "firebase/auth";
@@ -80,6 +81,15 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [ratingCodeId, setRatingCodeId] = useState(null);
   const [ratingCodeText, setRatingCodeText] = useState("");
+
+  // Handle Google redirect result
+  useEffect(() => {
+    getRedirectResult(auth).catch(err => {
+      if (err?.code && err.code !== "auth/no-current-user") {
+        setLoginError("שגיאה בהתחברות. נסה שוב.");
+      }
+    });
+  }, []);
 
   // URL param: ?ref=CODE_ID → go to bank and highlight that code
   useEffect(() => {
@@ -190,12 +200,9 @@ export default function App() {
   async function login() {
     setLoginError("");
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-      setScreen("home");
+      await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (err) {
-      if (err.code !== "auth/popup-closed-by-user") {
-        setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
-      }
+      setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
       console.error(err);
     }
   }
@@ -883,6 +890,23 @@ export default function App() {
         {screen === "profile" && user && profile && (
           <div>
             <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>האזור שלי</h2>
+
+            {/* UID display */}
+            <div style={{
+              background: "#f5f3ff", border: "1px solid #ede9fe",
+              borderRadius: 12, padding: "10px 16px", marginBottom: 16,
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>ה-UID שלך (לצורך הגדרת מנהל)</div>
+                <code style={{ fontSize: 11, fontFamily: "monospace", color: "#6C63FF" }}>{user.uid}</code>
+              </div>
+              <button onClick={() => { navigator.clipboard?.writeText(user.uid); }} style={{
+                fontSize: 11, padding: "4px 12px", borderRadius: 20,
+                border: "1px solid #c4b5fd", background: "#fff",
+                color: "#6C63FF", cursor: "pointer", fontWeight: 600,
+              }}>העתק</button>
+            </div>
 
             {/* my code */}
             <div style={{
