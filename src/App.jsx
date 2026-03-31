@@ -139,14 +139,15 @@ export default function App() {
     return unsub;
   }, [user]);
 
-  // Real-time codes listener
+  // Real-time codes listener — only when authenticated
   useEffect(() => {
+    if (!user) { setCodes([]); return; }
     const q = query(collection(db, "codes"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snapshot) => {
       setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return unsub;
-  }, []);
+  }, [user]);
 
   // Waiting list status
   useEffect(() => {
