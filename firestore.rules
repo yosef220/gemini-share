@@ -16,7 +16,7 @@ service cloud.firestore {
         && request.resource.data.remainingSlots == 10
         && request.resource.data.takenSlots == 0
         && request.resource.data.code is string
-        && request.resource.data.code.size() >= 10;
+        && request.resource.data.code.size() >= 6;
 
       allow update: if request.auth != null
         && request.resource.data.remainingSlots >= 0

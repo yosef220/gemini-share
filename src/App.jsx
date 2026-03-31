@@ -309,16 +309,20 @@ export default function App() {
   async function submitUpload(e) {
     e.preventDefault();
     setUploadError("");
-    const code = uploadCode.trim().toUpperCase();
-    if (!code || code.length < 10) {
-      setUploadError("קוד לא תקין — בדוק שוב");
+    let code = uploadCode.trim();
+    // Extract code from URL if full URL provided (e.g., https://g.co/g1referral/WEV7ND03)
+    const urlMatch = code.match(/g\.co\/g1referral\/([A-Z0-9]+)/i);
+    if (urlMatch) {
+      code = urlMatch[1].toUpperCase();
+    } else {
+      code = code.toUpperCase();
+    }
+    // Validate: must be 8 alphanumeric chars
+    if (!code || code.length < 6 || !/^[A-Z0-9]+$/.test(code)) {
+      setUploadError("קוד לא תקין — הזן כתובת מלאה (g.co/g1referral/XXX) או רק הקוד");
       return;
     }
-    if (!/^[A-Z0-9-]+$/.test(code)) {
-      setUploadError("קוד יכול להכיל רק אותיות באנגלית, מספרים ומקפים");
-      return;
-    }
-    if (codes.some(c => c.code === code)) {
+    if (codes.some(c => c.code === code || c.code.includes(code))) {
       setUploadError("קוד זה כבר קיים במערכת");
       return;
     }
@@ -702,7 +706,7 @@ export default function App() {
                 <form onSubmit={submitUpload}>
                   <input
                     value={uploadCode} onChange={e => setUploadCode(e.target.value)}
-                    placeholder="GEMINI-XXXX-XXXX-XXXX"
+                    placeholder="https://g.co/g1referral/XXXXXXXX"
                     style={{
                       width: "100%", padding: "10px 14px", borderRadius: 10,
                       border: `1px solid ${uploadError ? "#f87171" : "#ede9fe"}`,
