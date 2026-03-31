@@ -115,23 +115,28 @@ export default function App() {
       setUser(u);
       setAuthLoading(false);
       if (u) {
-        const userRef = doc(db, "users", u.uid);
-        const userDoc = await getDoc(userRef);
-        if (!userDoc.exists()) {
-          await setDoc(userRef, {
-            email: u.email,
-            hasReceivedCode: false,
-            hasUploadedCode: false,
-            lastReceivedCodeId: null,
-            lastReceivedCode: null,
-            markedTaken: false,
-            lockoutEnds: null,
-            uploadedCodeId: null,
-            uploadedCode: null,
-            notifications: { newCodes: true, renewal: true },
-            history: [],
-            createdAt: serverTimestamp(),
-          });
+        try {
+          const userRef = doc(db, "users", u.uid);
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            await setDoc(userRef, {
+              email: u.email,
+              hasReceivedCode: false,
+              hasUploadedCode: false,
+              lastReceivedCodeId: null,
+              lastReceivedCode: null,
+              markedTaken: false,
+              lockoutEnds: null,
+              uploadedCodeId: null,
+              uploadedCode: null,
+              notifications: { newCodes: true, renewal: true },
+              history: [],
+              createdAt: serverTimestamp(),
+            });
+          }
+        } catch (err) {
+          if (err.code === "unavailable") setFirestoreBlocked(true);
+          console.error("Auth user creation error:", err);
         }
       }
     });
