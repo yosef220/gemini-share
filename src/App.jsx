@@ -81,20 +81,12 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [ratingCodeId, setRatingCodeId] = useState(null);
   const [ratingCodeText, setRatingCodeText] = useState("");
-  const [firestoreBlocked, setFirestoreBlocked] = useState(false);
 
   // Handle Google redirect result
   useEffect(() => {
-    const wasPending = sessionStorage.getItem("authPending") === "1";
-    getRedirectResult(auth).then(result => {
-      sessionStorage.removeItem("authPending");
-      if (!result && wasPending) {
-        setFirestoreBlocked(true);
-      }
-    }).catch(err => {
-      sessionStorage.removeItem("authPending");
-      if (wasPending || (err?.code && err.code !== "auth/no-current-user")) {
-        setFirestoreBlocked(true);
+    getRedirectResult(auth).catch(err => {
+      if (err?.code && err.code !== "auth/no-current-user") {
+        setLoginError("שגיאה בהתחברות. נסה שוב.");
       }
     });
   }, []);
@@ -115,28 +107,23 @@ export default function App() {
       setUser(u);
       setAuthLoading(false);
       if (u) {
-        try {
-          const userRef = doc(db, "users", u.uid);
-          const userDoc = await getDoc(userRef);
-          if (!userDoc.exists()) {
-            await setDoc(userRef, {
-              email: u.email,
-              hasReceivedCode: false,
-              hasUploadedCode: false,
-              lastReceivedCodeId: null,
-              lastReceivedCode: null,
-              markedTaken: false,
-              lockoutEnds: null,
-              uploadedCodeId: null,
-              uploadedCode: null,
-              notifications: { newCodes: true, renewal: true },
-              history: [],
-              createdAt: serverTimestamp(),
-            });
-          }
-        } catch (err) {
-          if (err.code === "unavailable") setFirestoreBlocked(true);
-          console.error("Auth user creation error:", err);
+        const userRef = doc(db, "users", u.uid);
+        const userDoc = await getDoc(userRef);
+        if (!userDoc.exists()) {
+          await setDoc(userRef, {
+            email: u.email,
+            hasReceivedCode: false,
+            hasUploadedCode: false,
+            lastReceivedCodeId: null,
+            lastReceivedCode: null,
+            markedTaken: false,
+            lockoutEnds: null,
+            uploadedCodeId: null,
+            uploadedCode: null,
+            notifications: { newCodes: true, renewal: true },
+            history: [],
+            createdAt: serverTimestamp(),
+          });
         }
       }
     });
@@ -156,15 +143,9 @@ export default function App() {
   useEffect(() => {
     if (!user) { setCodes([]); return; }
     const q = query(collection(db, "codes"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q,
-      (snapshot) => {
-        setFirestoreBlocked(false);
-        setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        if (err.code === "unavailable") setFirestoreBlocked(true);
-      }
-    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      setCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
     return unsub;
   }, [user]);
 
@@ -220,10 +201,8 @@ export default function App() {
   async function login() {
     setLoginError("");
     try {
-      sessionStorage.setItem("authPending", "1");
       await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (err) {
-      sessionStorage.removeItem("authPending");
       setLoginError("שגיאה בכניסה עם גוגל. נסה שוב.");
       console.error(err);
     }
@@ -493,27 +472,6 @@ export default function App() {
           }}>{n.label}</button>
         ))}
       </nav>
-
-      {/* NetFree / firewall blocking banner */}
-      {firestoreBlocked && (
-        <div style={{
-          background: "#fef3c7", borderBottom: "1px solid #fcd34d",
-          padding: "12px 20px", textAlign: "center", fontSize: 13,
-        }}>
-          <strong>⚠️ החיבור לשרת נחסם על ידי תוכנת הסינון שלך (NetFree / אחרת)</strong>
-          <br />
-          <span style={{ color: "#6b7280" }}>
-            כדי להשתמש באפליקציה יש לפנות לחברת הסינון ולבקש פתיחה של הדומיין:{" "}
-            <code style={{ background: "#fde68a", padding: "1px 4px", borderRadius: 3 }}>firestore.googleapis.com</code>
-          </span>
-          <div style={{ marginTop: 6 }}>
-            <a href="https://support.netfree.link/en/submit-a-ticket" target="_blank" rel="noreferrer"
-              style={{ color: "#d97706", fontWeight: 700, fontSize: 12 }}>
-              פתח פניה ל-NetFree ←
-            </a>
-          </div>
-        </div>
-      )}
 
       <main style={{ maxWidth: 560, margin: "0 auto", padding: "24px 16px" }}>
 
